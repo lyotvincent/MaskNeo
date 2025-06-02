@@ -19,6 +19,7 @@ import logging
 import math
 import os
 import random
+import shutil
 from pathlib import Path
 
 import datasets
@@ -577,7 +578,8 @@ def main():
         all_predictions = []
         for step, batch in enumerate(tqdm(eval_dataloader, total=len(eval_dataloader)) ):
             with torch.no_grad():
-                outputs = model(**batch, backbone_model=backbone_model)
+                # outputs = model(**batch, backbone_model=backbone_model)
+                outputs = model(**batch)
             if outputs.disentangle_mask is not None:
                 zero_ratio = torch.sum(outputs.disentangle_mask == 0.) / outputs.disentangle_mask.numel()
             predictions = outputs.logits.argmax(dim=-1) if not is_regression else outputs.logits.squeeze()
@@ -593,6 +595,8 @@ def main():
             all_references += references.tolist()
             all_predictions += predictions.tolist()
 
+        accelerator.wait_for_everyone()
+        
         if num_labels > 2:
             eval_metric = [accuracy_score(y_true=all_references, y_pred=all_predictions),
                            precision_score(y_true=all_references, y_pred=all_predictions, average="macro", zero_division=1),
@@ -627,7 +631,8 @@ def main():
                     if resume_step is not None and step < resume_step:
                         completed_steps += 1
                         continue
-                outputs = model(**batch, backbone_model=backbone_model)
+                # outputs = model(**batch, backbone_model=backbone_model)
+                outputs = model(**batch)
                 #print(outputs.disentangle_mask, "num zero", torch.sum(outputs.disentangle_mask==0.))
                 loss = outputs.loss
                 # We keep track of the loss at each epoch
@@ -644,10 +649,20 @@ def main():
 
                 if isinstance(checkpointing_steps, int):
                     if completed_steps % checkpointing_steps == 0:
-                        output_dir = f"step_{completed_steps }"
+                        output_dir = f"step_{completed_steps}"
                         if args.output_dir is not None:
                             output_dir = os.path.join(args.output_dir, output_dir)
                         accelerator.save_state(output_dir)
+
+                        if args.output_dir is not None:
+                            all_ckpt = [d for d in os.listdir(args.output_dir) if d.startswith("step_") and os.path.isdir(os.path.join(args.output_dir, d))]
+                            all_ckpt = sorted(all_ckpt, key=lambda x: int(x.split("_")[1]))
+                            # remove old checkpoints if there are more than 3
+                            if len(all_ckpt) > 3:
+                                num_to_remove = len(all_ckpt) - 3
+                                for ckpt in all_ckpt[:num_to_remove]:
+                                    ckpt_path = os.path.join(args.output_dir, ckpt)
+                                    shutil.rmtree(ckpt_path)
 
                 if completed_steps >= args.max_train_steps:
                     break
@@ -658,7 +673,8 @@ def main():
             all_predictions = []
             for step, batch in enumerate(eval_dataloader):
                 with torch.no_grad():
-                    outputs = model(**batch, backbone_model=backbone_model)
+                    # outputs = model(**batch, backbone_model=backbone_model)
+                    outputs = model(**batch)
                 if outputs.disentangle_mask is not None:
                     zero_ratio = torch.sum(outputs.disentangle_mask == 0.) / outputs.disentangle_mask.numel()
                     zero_ratio = zero_ratio.item()
@@ -674,18 +690,18 @@ def main():
                 all_references += references.tolist()
                 all_predictions += predictions.tolist()
 
+            accelerator.wait_for_everyone()
+            
             if num_labels > 2:
                 all_eval_metric = [accuracy_score(y_true=all_references, y_pred=all_predictions),
-                               precision_score(y_true=all_references, y_pred=all_predictions, average="macro",
-                                               zero_division=1),
-                               recall_score(y_true=all_references, y_pred=all_predictions, average="macro",
-                                            zero_division=1),
-                               f1_score(y_true=all_references, y_pred=all_predictions, average="macro")]
+                                   precision_score(y_true=all_references, y_pred=all_predictions, average="macro", zero_division=1),
+                                   recall_score(y_true=all_references, y_pred=all_predictions, average="macro", zero_division=1),
+                                   f1_score(y_true=all_references, y_pred=all_predictions, average="macro")]
             else:
                 all_eval_metric = [accuracy_score(y_true=all_references, y_pred=all_predictions),
-                               precision_score(y_true=all_references, y_pred=all_predictions),
-                               recall_score(y_true=all_references, y_pred=all_predictions),
-                               f1_score(y_true=all_references, y_pred=all_predictions)]
+                                   precision_score(y_true=all_references, y_pred=all_predictions),
+                                   recall_score(y_true=all_references, y_pred=all_predictions),
+                                   f1_score(y_true=all_references, y_pred=all_predictions)]
 
             metrics.append(all_eval_metric[0])
             logger.info(f"epoch {epoch}: {all_eval_metric}")
