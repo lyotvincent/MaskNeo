@@ -589,21 +589,22 @@ def main():
 
         accelerator.wait_for_everyone()
         
-        if num_labels > 2:
-            eval_metric = [accuracy_score(y_true=all_references, y_pred=all_predictions),
-                           precision_score(y_true=all_references, y_pred=all_predictions, average="macro", zero_division=1),
-                           recall_score(y_true=all_references, y_pred=all_predictions, average="macro", zero_division=1),
-                           f1_score(y_true=all_references, y_pred=all_predictions, average="macro")]
-        else:
-            eval_metric = [accuracy_score(y_true=all_references, y_pred=all_predictions),
-                           precision_score(y_true=all_references, y_pred=all_predictions),
-                           recall_score(y_true=all_references, y_pred=all_predictions),
-                           f1_score(y_true=all_references, y_pred=all_predictions)]
+        if accelerator.is_main_process:
+            if num_labels > 2:
+                eval_metric = [accuracy_score(y_true=all_references, y_pred=all_predictions),
+                               precision_score(y_true=all_references, y_pred=all_predictions, average="macro", zero_division=1),
+                               recall_score(y_true=all_references, y_pred=all_predictions, average="macro", zero_division=1),
+                               f1_score(y_true=all_references, y_pred=all_predictions, average="macro")]
+            else:
+                eval_metric = [accuracy_score(y_true=all_references, y_pred=all_predictions),
+                               precision_score(y_true=all_references, y_pred=all_predictions),
+                               recall_score(y_true=all_references, y_pred=all_predictions),
+                               f1_score(y_true=all_references, y_pred=all_predictions)]
         logger.info(f"evaluation result: {eval_metric}")
         if outputs.disentangle_mask is not None:
             logger.info(f"zero ratio in mask layer: {zero_ratio}")
         # save prediction result
-        if args.prediction_result_file is not None:
+        if args.prediction_result_file is not None and accelerator.is_main_process:
             df = pd.DataFrame({'text': all_inputs, 'reference': all_references, 'predictions': all_predictions})
             df.to_csv(args.prediction_result_file, index=False)
         else:
@@ -647,6 +648,7 @@ def main():
                         accelerator.save_state(output_dir)
 
                         if args.output_dir is not None:
+                            accelerator.wait_for_everyone()
                             all_ckpt = [d for d in os.listdir(args.output_dir) if d.startswith("step_") and os.path.isdir(os.path.join(args.output_dir, d))]
                             all_ckpt = sorted(all_ckpt, key=lambda x: int(x.split("_")[1]))
                             # remove old checkpoints if there are more than 3
@@ -676,17 +678,31 @@ def main():
 
             accelerator.wait_for_everyone()
             
-            if num_labels > 2:
-                all_eval_metric = [accuracy_score(y_true=all_references, y_pred=all_predictions),
-                                   precision_score(y_true=all_references, y_pred=all_predictions, average="macro", zero_division=1),
-                                   recall_score(y_true=all_references, y_pred=all_predictions, average="macro", zero_division=1),
-                                   f1_score(y_true=all_references, y_pred=all_predictions, average="macro")]
+            if accelerator.is_main_process:
+                if num_labels > 2:
+                    all_eval_metric = [accuracy_score(y_true=all_references, y_pred=all_predictions),
+                                       precision_score(y_true=all_references, y_pred=all_predictions, average="macro", zero_division=1),
+                                       recall_score(y_true=all_references, y_pred=all_predictions, average="macro", zero_division=1),
+                                       f1_score(y_true=all_references, y_pred=all_predictions, average="macro")]
+                else:
+                    all_eval_metric = [accuracy_score(y_true=all_references, y_pred=all_predictions),
+                                       precision_score(y_true=all_references, y_pred=all_predictions),
+                                       recall_score(y_true=all_references, y_pred=all_predictions),
+                                       f1_score(y_true=all_references, y_pred=all_predictions)]
             else:
-                all_eval_metric = [accuracy_score(y_true=all_references, y_pred=all_predictions),
-                                   precision_score(y_true=all_references, y_pred=all_predictions),
-                                   recall_score(y_true=all_references, y_pred=all_predictions),
-                                   f1_score(y_true=all_references, y_pred=all_predictions)]
+                all_eval_metric = [0.0, 0.0, 0.0, 0.0]
 
+            if args.with_tracking:
+                accelerator.log(
+                    values={
+                        "accuracy": all_eval_metric[0],
+                        "f1": all_eval_metric[3],
+                        "epoch": epoch,
+                        "loss": total_loss / len(train_dataloader),
+                        },
+                        step=completed_steps
+                        )
+            
             metrics.append(all_eval_metric[0])
             logger.info(f"epoch {epoch}: {all_eval_metric}")
 
@@ -695,7 +711,7 @@ def main():
                 model.config.task_specific_params = f"zero_ratio: {zero_ratio}"
                 logger.info(f"zero ratio in mask layer: {zero_ratio}")
 
-            if args.output_dir is not None:
+            if args.output_dir is not None and accelerator.is_main_process:
                 all_results["evaluation"] = metrics
                 all_results["zero_ratios"] = zero_ratios
                 with open(os.path.join(args.output_dir, "all_results.json"), "w") as f:
@@ -711,7 +727,8 @@ def main():
                     )
                     if accelerator.is_main_process:
                         tokenizer.save_pretrained(args.output_dir)
-
+    if args.with_tracking:
+        accelerator.end_training()
 
 
 if __name__ == "__main__":
