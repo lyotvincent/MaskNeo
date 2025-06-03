@@ -572,7 +572,6 @@ def main():
 
     if args.only_evaluation:
         model.eval()
-        samples_seen = 0
         all_inputs = []
         all_references = []
         all_predictions = []
@@ -583,14 +582,7 @@ def main():
             if outputs.disentangle_mask is not None:
                 zero_ratio = torch.sum(outputs.disentangle_mask == 0.) / outputs.disentangle_mask.numel()
             predictions = outputs.logits.argmax(dim=-1) if not is_regression else outputs.logits.squeeze()
-            predictions, references = accelerator.gather((predictions, batch["labels"]))
-            # If we are in a multiprocess environment, the last batch has duplicates
-            if accelerator.num_processes > 1:
-                if step == len(eval_dataloader) - 1:
-                    predictions = predictions[: len(eval_dataloader.dataset) - samples_seen]
-                    references = references[: len(eval_dataloader.dataset) - samples_seen]
-                else:
-                    samples_seen += references.shape[0]
+            predictions, references = accelerator.gather_for_metrics((predictions, batch["labels"]))
             all_inputs += tokenizer.batch_decode(batch["input_ids"], skip_special_tokens=True)
             all_references += references.tolist()
             all_predictions += predictions.tolist()
@@ -668,7 +660,6 @@ def main():
                     break
 
             model.eval()
-            samples_seen = 0
             all_references = []
             all_predictions = []
             for step, batch in enumerate(eval_dataloader):
@@ -679,14 +670,7 @@ def main():
                     zero_ratio = torch.sum(outputs.disentangle_mask == 0.) / outputs.disentangle_mask.numel()
                     zero_ratio = zero_ratio.item()
                 predictions = outputs.logits.argmax(dim=-1) if not is_regression else outputs.logits.squeeze()
-                predictions, references = accelerator.gather((predictions, batch["labels"]))
-                # If we are in a multiprocess environment, the last batch has duplicates
-                if accelerator.num_processes > 1:
-                    if step == len(eval_dataloader) - 1:
-                        predictions = predictions[: len(eval_dataloader.dataset) - samples_seen]
-                        references = references[: len(eval_dataloader.dataset) - samples_seen]
-                    else:
-                        samples_seen += references.shape[0]
+                predictions, references = accelerator.gather_for_metrics((predictions, batch["labels"]))
                 all_references += references.tolist()
                 all_predictions += predictions.tolist()
 
