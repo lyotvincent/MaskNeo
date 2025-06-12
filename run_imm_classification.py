@@ -130,12 +130,6 @@ def parse_args():
         help="If passed, pad all samples to `max_length`. Otherwise, dynamic padding is used.",
     )
     parser.add_argument(
-        "--backbone_model",
-        type=str,
-        help="Path to pretrained model or model identifier from huggingface.co/models.",
-        required=True,
-    )
-    parser.add_argument(
         "--model_name_or_path",
         type=str,
         help="Path to pretrained model or model identifier from huggingface.co/models.",
@@ -347,12 +341,6 @@ def main():
     # download model & vocab.
     config = AutoConfig.from_pretrained(args.model_name_or_path, num_labels=num_labels, finetuning_task=args.task_name)
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=not args.use_slow_tokenizer)
-    # if "bart" in args.backbone_model:
-    #     backbone_model = BartModel.from_pretrained(args.backbone_model)
-    # elif "bert" in args.backbone_model:
-    #     backbone_model = BertModel.from_pretrained(args.backbone_model)
-    # else:
-    backbone_model = AutoModel.from_pretrained(args.backbone_model)
 
     if args.model_class == "BartForSequenceClassification":
         model = BartForSequenceClassification.from_pretrained(
@@ -536,8 +524,8 @@ def main():
     )
 
     # Prepare everything with our `accelerator`.
-    model, optimizer, train_dataloader, eval_dataloader, lr_scheduler, backbone_model = accelerator.prepare(
-        model, optimizer, train_dataloader, eval_dataloader, lr_scheduler, backbone_model
+    model, optimizer, train_dataloader, eval_dataloader, lr_scheduler = accelerator.prepare(
+        model, optimizer, train_dataloader, eval_dataloader, lr_scheduler
     )
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed
@@ -583,7 +571,6 @@ def main():
         all_predictions = []
         for step, batch in enumerate(tqdm(eval_dataloader, total=len(eval_dataloader)) ):
             with torch.no_grad():
-                # outputs = model(**batch, backbone_model=backbone_model)
                 outputs = model(**batch)
             if outputs.disentangle_mask is not None:
                 zero_ratio = torch.sum(outputs.disentangle_mask == 0.) / outputs.disentangle_mask.numel()
@@ -630,7 +617,6 @@ def main():
                     if resume_step is not None and step < resume_step:
                         completed_steps += 1
                         continue
-                # outputs = model(**batch, backbone_model=backbone_model)
                 outputs = model(**batch)
                 #print(outputs.disentangle_mask, "num zero", torch.sum(outputs.disentangle_mask==0.))
                 loss = outputs.loss
@@ -672,7 +658,6 @@ def main():
             all_predictions = []
             for step, batch in enumerate(eval_dataloader):
                 with torch.no_grad():
-                    # outputs = model(**batch, backbone_model=backbone_model)
                     outputs = model(**batch)
                 if outputs.disentangle_mask is not None:
                     zero_ratio = torch.sum(outputs.disentangle_mask == 0.) / outputs.disentangle_mask.numel()
