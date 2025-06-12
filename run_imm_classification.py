@@ -411,6 +411,8 @@ def main():
     else:
         # Again, we try to have some nice defaults but don't hesitate to tweak to your use case.
         non_label_column_names = [name for name in raw_datasets["train"].column_names if name != "label"]
+        # add an assert statement to avoid potential errors
+        assert "sentence1" in non_label_column_names and "sentence2" in non_label_column_names
         if "sentence1" in non_label_column_names and "sentence2" in non_label_column_names:
             sentence1_key, sentence2_key = "sentence1", "sentence2"
         else:
@@ -442,6 +444,10 @@ def main():
             )
     elif args.task_name is None and not is_regression:
         label_to_id = {v: i for i, v in enumerate(label_list)}
+
+    # apply to binary classification tasks, don't hesitate to tweak to your use case.
+    assert len(label_to_id) == 2
+    assert label_to_id["0"] == 0 and label_to_id["1"] == 1
 
     print(label_to_id)
     if label_to_id is not None:
