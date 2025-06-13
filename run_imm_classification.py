@@ -452,14 +452,24 @@ def main():
         texts = (
             (examples[sentence1_key],) if sentence2_key is None else (examples[sentence1_key], examples[sentence2_key])
         )
-        result = tokenizer(*texts, padding=padding, max_length=args.max_length, truncation=True)
+        
+        processed_texts = []
+        for text_group in texts:
+            processed_group = []
+            for text in text_group:
+                processed_text = " ".join(list(text))
+                processed_group.append(processed_text)
+            processed_texts.append(processed_group)
+        
+        if len(processed_texts) == 1:
+            result = tokenizer(processed_texts[0], padding=padding, max_length=args.max_length, truncation=True)
+        else:
+            result = tokenizer(processed_texts[0], processed_texts[1], padding=padding, max_length=args.max_length, truncation=True)
 
         if "label" in examples:
             if label_to_id is not None:
-                # Map labels to IDs (not necessary for GLUE tasks)
                 result["labels"] = [label_to_id[l] for l in examples["label"]]
             else:
-                # In all cases, rename the column to labels because the model will expect that.
                 result["labels"] = examples["label"]
         return result
 
