@@ -217,6 +217,12 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--patience",
+        type=int,
+        default=5,
+        help="Number of epochs with no improvement after which training will be stopped.",
+    )
+    parser.add_argument(
         "--ignore_mismatched_sizes",
         action="store_true",
         help="Whether or not to enable to load a pretrained model whose head dimensions are different.",
@@ -617,6 +623,8 @@ def main():
         metrics = []
         zero_ratios = []
         best_acc = 0
+        patience_counter = 0
+
         for epoch in range(starting_epoch, args.num_train_epochs):
             model.train()
             if args.with_tracking:
@@ -720,6 +728,7 @@ def main():
 
             if all_eval_metric[0] > best_acc:
                 best_acc = all_eval_metric[0]
+                patience_counter = 0
                 if args.output_dir is not None:
                     accelerator.wait_for_everyone()
                     unwrapped_model = accelerator.unwrap_model(model)
@@ -728,6 +737,14 @@ def main():
                     )
                     if accelerator.is_main_process:
                         tokenizer.save_pretrained(args.output_dir)
+            else:
+                patience_counter += 1
+                logger.info(f"No improvement for {patience_counter} epochs (best accuracy: {best_acc})")
+                
+                if patience_counter >= args.patience:
+                    logger.info(f"Early stopping triggered after {epoch+1} epochs without improvement")
+                    break
+    
     if args.with_tracking:
         accelerator.end_training()
 
