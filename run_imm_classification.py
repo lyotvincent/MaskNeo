@@ -705,9 +705,11 @@ def main():
                 accelerator.log(
                     values={
                         "accuracy": all_eval_metric[0],
+                        "precision": all_eval_metric[1],
+                        "recall": all_eval_metric[2],
                         "f1": all_eval_metric[3],
                         "epoch": epoch,
-                        "loss": total_loss / len(train_dataloader),
+                        "train_loss": total_loss / len(train_dataloader),
                         },
                         step=completed_steps
                         )
