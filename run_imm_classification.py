@@ -85,8 +85,7 @@ task_to_keys = {
     "wnli": ("sentence1", "sentence2"),
 }
 
-# python run_text_disentangled_classification.py --train_file dataset/sentiment/original_imdb/train.csv --validation_file dataset/sentiment/original_imdb/test.csv
-# --model_name_or_path checkpoints/bart_large/ --num_train_epochs 10 --per_device_train_batch_size 32 --output_dir checkpoints/sequenceCLS_sparseAttnJoint_bart_originalIMDB
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Finetune a transformers model on a text classification task")
     parser.add_argument(

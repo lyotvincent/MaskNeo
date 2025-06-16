@@ -1909,7 +1909,7 @@ class BertForTokenAttentionSparseCLSJoint(BertPreTrainedModel):
         super().__init__(config)
         self.num_labels = config.num_labels
         self.bert = BertModel(config)
-        self.freeze_params(self.bert)
+        # self.freeze_params(self.bert)
         self.learnable_mask = MaskedElementWiseVector(config.hidden_size)
 
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
