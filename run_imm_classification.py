@@ -248,9 +248,6 @@ def parse_args():
 
 def main():
     args = parse_args()
-    # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
-    # information sent is the one passed as arguments along with your Python/PyTorch versions.
-    send_example_telemetry("run_glue_no_trainer", args)
 
     # Initialize the accelerator. We will let the accelerator handle device placement for us in this example.
     # If we're using tracking, we also need to initialize it here and it will by default pick up all supported trackers
@@ -443,7 +440,7 @@ def main():
     assert len(label_to_id) == 2
     assert label_to_id["0"] == 0 and label_to_id["1"] == 1
 
-    print(label_to_id)
+    logger.info(f"label_to_id: {label_to_id}")
     if label_to_id is not None:
         model.config.label2id = label_to_id
         model.config.id2label = {id: label for label, id in label_to_id.items()}
@@ -486,6 +483,7 @@ def main():
             remove_columns=raw_datasets["train"].column_names,
             desc="Running tokenizer on dataset",
         )
+    accelerator.wait_for_everyone()
 
     train_dataset = processed_datasets["train"]
     eval_dataset = processed_datasets["validation_matched" if args.task_name == "mnli" else "validation"]
@@ -562,7 +560,7 @@ def main():
         experiment_config = vars(args)
         # TensorBoard cannot log Enums, need the raw value
         experiment_config["lr_scheduler_type"] = experiment_config["lr_scheduler_type"].value
-        accelerator.init_trackers("glue_no_trainer", experiment_config)
+        accelerator.init_trackers("imm_classification", experiment_config)
 
 
     # Train!
@@ -667,14 +665,15 @@ def main():
 
                         if args.output_dir is not None:
                             accelerator.wait_for_everyone()
-                            all_ckpt = [d for d in os.listdir(args.output_dir) if d.startswith("step_") and os.path.isdir(os.path.join(args.output_dir, d))]
-                            all_ckpt = sorted(all_ckpt, key=lambda x: int(x.split("_")[1]))
-                            # remove old checkpoints if there are more than 3
-                            if len(all_ckpt) > 3:
-                                num_to_remove = len(all_ckpt) - 3
-                                for ckpt in all_ckpt[:num_to_remove]:
-                                    ckpt_path = os.path.join(args.output_dir, ckpt)
-                                    shutil.rmtree(ckpt_path)
+                            if accelerator.is_main_process:
+                                all_ckpt = [d for d in os.listdir(args.output_dir) if d.startswith("step_") and os.path.isdir(os.path.join(args.output_dir, d))]
+                                all_ckpt = sorted(all_ckpt, key=lambda x: int(x.split("_")[1]))
+                                # remove old checkpoints if there are more than 3
+                                if len(all_ckpt) > 3:
+                                    num_to_remove = len(all_ckpt) - 3
+                                    for ckpt in all_ckpt[:num_to_remove]:
+                                        ckpt_path = os.path.join(args.output_dir, ckpt)
+                                        shutil.rmtree(ckpt_path)
 
                 if completed_steps >= args.max_train_steps:
                     break
@@ -736,24 +735,29 @@ def main():
                 with open(os.path.join(args.output_dir, "all_results.json"), "w") as f:
                     json.dump(all_results, f)
 
-            if all_eval_metric[0] > best_acc:
-                best_acc = all_eval_metric[0]
-                patience_counter = 0
-                if args.output_dir is not None:
-                    accelerator.wait_for_everyone()
-                    unwrapped_model = accelerator.unwrap_model(model)
-                    unwrapped_model.save_pretrained(
-                        args.output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save
-                    )
-                    if accelerator.is_main_process:
+            should_early_stop = False
+            if accelerator.is_main_process:
+                if all_eval_metric[0] > best_acc:
+                    best_acc = all_eval_metric[0]
+                    patience_counter = 0
+                    if args.output_dir is not None:
+                        unwrapped_model = accelerator.unwrap_model(model)
+                        unwrapped_model.save_pretrained(
+                            args.output_dir, is_main_process=accelerator.is_main_process, save_function=accelerator.save
+                        )
                         tokenizer.save_pretrained(args.output_dir)
-            else:
-                patience_counter += 1
-                logger.info(f"No improvement for {patience_counter} epochs (best accuracy: {best_acc})")
-                
-                if patience_counter >= args.patience:
-                    logger.info(f"Early stopping triggered after {epoch+1} epochs without improvement")
-                    break
+                    accelerator.wait_for_everyone()
+                else:
+                    patience_counter += 1
+                    logger.info(f"No improvement for {patience_counter} epochs (best accuracy: {best_acc})")
+                    
+                    if patience_counter >= args.patience:
+                        logger.info(f"Early stopping triggered after {epoch+1} epochs without improvement")
+                        should_early_stop = True
+            should_early_stop = accelerator.gather(torch.tensor([should_early_stop], device=accelerator.device)).any().item()
+            if should_early_stop:
+                accelerator.wait_for_everyone()
+                break
     
     if args.with_tracking:
         accelerator.end_training()
