@@ -143,13 +143,13 @@ def parse_args():
     parser.add_argument(
         "--per_device_train_batch_size",
         type=int,
-        default=32,
+        default=8,
         help="Batch size (per device) for the training dataloader.",
     )
     parser.add_argument(
         "--per_device_eval_batch_size",
         type=int,
-        default=64,
+        default=16,
         help="Batch size (per device) for the evaluation dataloader.",
     )
     parser.add_argument(
@@ -159,7 +159,7 @@ def parse_args():
         help="Initial learning rate (after the potential warmup period) to use.",
     )
     parser.add_argument("--weight_decay", type=float, default=0.0, help="Weight decay to use.")
-    parser.add_argument("--num_train_epochs", type=int, default=3, help="Total number of training epochs to perform.")
+    parser.add_argument("--num_train_epochs", type=int, default=100, help="Total number of training epochs to perform.")
     parser.add_argument(
         "--max_train_steps",
         type=int,
@@ -175,7 +175,7 @@ def parse_args():
     parser.add_argument(
         "--lr_scheduler_type",
         type=SchedulerType,
-        default="constant",
+        default="linear",
         help="The scheduler type to use.",
         choices=["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
     )
@@ -183,7 +183,7 @@ def parse_args():
         "--num_warmup_steps", type=int, default=0, help="Number of steps for the warmup in the lr scheduler."
     )
     parser.add_argument("--output_dir", type=str, default=None, help="Where to store the final model.")
-    parser.add_argument("--seed", type=int, default=1000, help="A seed for reproducible training.")
+    parser.add_argument("--seed", type=int, default=42, help="A seed for reproducible training.")
     parser.add_argument("--push_to_hub", action="store_true", help="Whether or not to push the model to the Hub.")
     parser.add_argument(
         "--hub_model_id", type=str, help="The name of the repository to keep in sync with the local `output_dir`."
@@ -219,7 +219,7 @@ def parse_args():
     parser.add_argument(
         "--patience",
         type=int,
-        default=5,
+        default=6,
         help="Number of epochs with no improvement after which training will be stopped.",
     )
     parser.add_argument(
@@ -616,6 +616,14 @@ def main():
         if args.prediction_result_file is not None and accelerator.is_main_process:
             df = pd.DataFrame({'text': all_inputs, 'reference': all_references, 'predictions': all_predictions})
             df.to_csv(args.prediction_result_file, index=False)
+            eval_metric_file = os.path.splitext(args.prediction_result_file)[0] + "_eval_metric.json"
+            with open(eval_metric_file, "w") as f:
+                json.dump({
+                    "accuracy": eval_metric[0],
+                    "precision": eval_metric[1],
+                    "recall": eval_metric[2],
+                    "f1": eval_metric[3]
+                }, f)
         else:
             logger.info("please provide a prediction_result_file to save prediction result")
     else:
