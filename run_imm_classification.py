@@ -21,6 +21,7 @@ import os
 import random
 import shutil
 from pathlib import Path
+import re
 
 import datasets
 import torch
@@ -64,6 +65,8 @@ from models.modeling_bart import (
 from models.modeling_bert import (
     BertForTokenAttentionSparseCLSJoint
 )
+from transformers import T5Tokenizer
+from models.modeling_t5 import T5ForTokenAttentionSparseCLSJoint
 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
@@ -342,7 +345,8 @@ def main():
     # In distributed training, the .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
     config = AutoConfig.from_pretrained(args.model_name_or_path, num_labels=num_labels, finetuning_task=args.task_name)
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=not args.use_slow_tokenizer)
+    # tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=not args.use_slow_tokenizer)
+    tokenizer = T5Tokenizer.from_pretrained(args.model_name_or_path, do_lower_case=False)
 
     if args.model_class == "BartForSequenceClassification":
         model = BartForSequenceClassification.from_pretrained(
@@ -380,7 +384,15 @@ def main():
             ignore_mismatched_sizes=args.ignore_mismatched_sizes,
         )
     elif args.model_class == "BertForTokenAttentionSparseCLSJoint":
-        model = BertForTokenAttentionSparseCLSJoint.from_pretrained(
+        # model = BertForTokenAttentionSparseCLSJoint.from_pretrained(
+        #     args.model_name_or_path,
+        #     from_tf=bool(".ckpt" in args.model_name_or_path),
+        #     config=config,
+        #     ignore_mismatched_sizes=args.ignore_mismatched_sizes,
+        # )
+        model = BertForTokenAttentionSparseCLSJoint(config)
+    elif args.model_class == "T5ForTokenAttentionSparseCLSJoint":
+        model = T5ForTokenAttentionSparseCLSJoint.from_pretrained(
             args.model_name_or_path,
             from_tf=bool(".ckpt" in args.model_name_or_path),
             config=config,
@@ -437,7 +449,7 @@ def main():
 
     # apply to binary classification tasks, don't hesitate to tweak to your use case.
     assert len(label_to_id) == 2
-    assert label_to_id["0"] == 0 and label_to_id["1"] == 1
+    assert label_to_id[0] == 0 and label_to_id[1] == 1
 
     logger.info(f"label_to_id: {label_to_id}")
     if label_to_id is not None:
@@ -456,10 +468,13 @@ def main():
         )
         
         processed_texts = []
-        for text_group in texts:
+        for i, text_group in enumerate(texts):
             processed_group = []
-            for text in text_group:
-                processed_text = " ".join(list(text))
+            for j, text in enumerate(text_group):
+                if i == 1:
+                    assert sentence2_key is not None
+                    text = text[:180]  # The HLA sequence is truncated to the peptide-binding domain (chain A, residues 1 to 180).
+                processed_text = " ".join(list(re.sub(r"[UZOB]", "X", text)))
                 processed_group.append(processed_text)
             processed_texts.append(processed_group)
         
@@ -626,6 +641,9 @@ def main():
     else:
         all_results = {}
         metrics = []
+        metrics2 = []
+        metrics3 = []
+        metrics4 = []
         zero_ratios = []
         best_acc = 0
         patience_counter = 0
@@ -714,13 +732,15 @@ def main():
                         "precision": all_eval_metric[1],
                         "recall": all_eval_metric[2],
                         "f1": all_eval_metric[3],
-                        "epoch": epoch,
                         "train_loss": total_loss / len(train_dataloader),
                         },
                         step=completed_steps
                         )
             
             metrics.append(all_eval_metric[0])
+            metrics2.append(all_eval_metric[1])
+            metrics3.append(all_eval_metric[2])
+            metrics4.append(all_eval_metric[3])
             logger.info(f"epoch {epoch}: {all_eval_metric}")
 
             if outputs.disentangle_mask is not None:
@@ -729,7 +749,10 @@ def main():
                 logger.info(f"zero ratio in mask layer: {zero_ratio}")
 
             if args.output_dir is not None and accelerator.is_main_process:
-                all_results["evaluation"] = metrics
+                all_results["accuracy"] = metrics
+                all_results["precision"] = metrics2
+                all_results["recall"] = metrics3
+                all_results["f1"] = metrics4
                 all_results["zero_ratios"] = zero_ratios
                 with open(os.path.join(args.output_dir, "all_results.json"), "w") as f:
                     json.dump(all_results, f)
