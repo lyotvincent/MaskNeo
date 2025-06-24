@@ -2510,7 +2510,10 @@ class T5ForTokenAttentionSparseCLSJoint(T5PreTrainedModel):
         logits = self.classifier(merged_label_vector)
         loss = None
         if labels is not None:
-            loss_fct = CrossEntropyLoss()
+            cur_device = labels.device
+            cur_weights = torch.tensor([1.0, 8.0]).to(cur_device)
+            loss_fct = CrossEntropyLoss(weight=cur_weights)
+
             loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
             loss += self.alpha * torch.sum(torch.exp(-self.learnable_mask.threshold))
             #print(loss, type(loss))

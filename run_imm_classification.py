@@ -645,7 +645,7 @@ def main():
         metrics3 = []
         metrics4 = []
         zero_ratios = []
-        best_acc = 0
+        best_metric = 0
         patience_counter = 0
 
         for epoch in range(starting_epoch, args.num_train_epochs):
@@ -759,8 +759,8 @@ def main():
 
             should_early_stop = False
             if accelerator.is_main_process:
-                if all_eval_metric[0] > best_acc:
-                    best_acc = all_eval_metric[0]
+                if all_eval_metric[3] > best_metric:
+                    best_metric = all_eval_metric[3]
                     patience_counter = 0
                     if args.output_dir is not None:
                         unwrapped_model = accelerator.unwrap_model(model)
@@ -771,7 +771,7 @@ def main():
                     accelerator.wait_for_everyone()
                 else:
                     patience_counter += 1
-                    logger.info(f"No improvement for {patience_counter} epochs (best accuracy: {best_acc})")
+                    logger.info(f"No improvement for {patience_counter} epochs (best metric: {best_metric})")
                     
                     if patience_counter >= args.patience:
                         logger.info(f"Early stopping triggered after {epoch+1} epochs without improvement")
