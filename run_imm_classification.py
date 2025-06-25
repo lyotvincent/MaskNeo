@@ -26,6 +26,7 @@ import re
 import datasets
 import torch
 from datasets import load_dataset
+from datasets import concatenate_datasets
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
@@ -501,6 +502,21 @@ def main():
 
     train_dataset = processed_datasets["train"]
     eval_dataset = processed_datasets["validation_matched" if args.task_name == "mnli" else "validation"]
+
+    positive_sample_indices = [i for i, example in enumerate(train_dataset) if example["labels"] == 1]
+
+    positive_count = len(positive_sample_indices)
+    negative_count = len(train_dataset) - positive_count
+    logger.info(f"the original training set: positive {positive_count}, negative {negative_count}.")
+
+    if (negative_count / positive_count) > 8:
+        positive_samples = train_dataset.select(positive_sample_indices + positive_sample_indices)
+
+        train_dataset = concatenate_datasets([train_dataset, positive_samples])
+
+        new_positive_count = sum(1 for example in train_dataset if example["labels"] == 1)
+        new_negative_count = len(train_dataset) - new_positive_count
+        logger.info(f"the oversampled training set: positive {new_positive_count}, negative {new_negative_count}.")
 
     # Log a few random samples from the training set:
     for index in random.sample(range(len(train_dataset)), 3):
