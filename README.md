@@ -17,7 +17,7 @@ conda activate MaskNeo
 The required files above should be placed in the current directory.
 
 ## Usage
-An example input data is available in the `example` folder. The input data should have `peptide`, `HLA` and `immunogenicity` columns in a **`tab-delimited text format`**. Run the following command to preprocess the data:
+An example input data is available in the `example` folder. The input data should have `peptide`, `HLA` and `immunogenicity` columns. Run the following command to preprocess the data:
 ```shell
 python data_preprocess.py
 ```
