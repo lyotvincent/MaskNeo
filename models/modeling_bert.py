@@ -1908,11 +1908,19 @@ class BertForTokenAttentionSparseCLSJoint(BertPreTrainedModel):
     def __init__(self, config: BertConfig):
         super().__init__(config)
         self.num_labels = config.num_labels
-        self.bert = BertModel(config)
-        self.freeze_params(self.bert)
+        self.config = config
+
+        self.bert = BertModel.from_pretrained("prot_bert")
+        # self.freeze_params(self.bert)
+        self.dropout = nn.Dropout(0.1)
         self.learnable_mask = MaskedElementWiseVector(config.hidden_size)
-        self.classifier = nn.Linear(config.hidden_size, config.num_labels)
-        self.alpha = 0.0005 # scale for regularization of mask layer
+
+        self.fc1 = nn.Linear(config.hidden_size, config.hidden_size * 2)
+        self.fc2 = nn.Linear(config.hidden_size * 2, config.hidden_size)
+        # self.classifier = nn.Linear(config.hidden_size, config.num_labels)
+        self.classifier = nn.Linear(config.hidden_size, 1)
+        self.alpha = 0.00005 # scale for regularization of mask layer
+        self.pooled_weight = nn.Parameter(torch.tensor([0.5]))
         # Initialize weights and apply final processing
         self.post_init()
 
@@ -1964,14 +1972,27 @@ class BertForTokenAttentionSparseCLSJoint(BertPreTrainedModel):
         masked_embeddings = masked_embeddings * attn_weights.expand(bsz, seq_len, hidden_size)
         merged_label_vector = torch.sum(masked_embeddings, dim=1)
         #print(merged_label_vector.shape)
-        logits = self.classifier(merged_label_vector)
+
+        pooled_vector = torch.sum(outputs["last_hidden_state"], dim=1)
+
+        fin_vector = self.pooled_weight * pooled_vector + (1 - self.pooled_weight) * merged_label_vector
+        
+        mapped_vector = self.fc1(fin_vector)
+        mapped_vector = nn.functional.relu(mapped_vector)
+        mapped_vector = self.fc2(mapped_vector)
+        mapped_vector = self.dropout(mapped_vector)
+        
+        logits = self.classifier(mapped_vector)
         loss = None
 
         if labels is not None:
-            loss_fct = CrossEntropyLoss()
-            loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
+            # cur_device = labels.device
+            # pos_weight = torch.tensor([6.0]).to(cur_device)
+            # loss_fct = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+            loss_fct = nn.BCEWithLogitsLoss()
+            
+            loss = loss_fct(logits.view(-1, 1), labels.float().view(-1, 1))
             loss += self.alpha * torch.sum(torch.exp(-self.learnable_mask.threshold))
-            #print(loss, type(loss))
 
         return DisentangledSequenceClassifierOutput(
             loss=loss,

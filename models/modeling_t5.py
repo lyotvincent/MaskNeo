@@ -2451,8 +2451,6 @@ class T5ForTokenAttentionSparseCLSJoint(T5PreTrainedModel):
         self.model = T5Model(config)
         self.freeze_params(self.model)
         self.learnable_mask = MaskedElementWiseVector(config.hidden_size)
-        self.fc1 = nn.Linear(config.hidden_size, config.hidden_size * 2)
-        self.fc2 = nn.Linear(config.hidden_size * 2, config.hidden_size)
         self.classifier = nn.Linear(config.hidden_size, config.num_labels)
         self.alpha = 0.0005 # scale for regularization of mask layer
         # Initialize weights and apply final processing
@@ -2504,15 +2502,10 @@ class T5ForTokenAttentionSparseCLSJoint(T5PreTrainedModel):
         attn_weights = nn.functional.softmax(attn_weights, dim=1)
         masked_embeddings = masked_embeddings * attn_weights.expand(bsz, seq_len, hidden_size)
         merged_label_vector = torch.sum(masked_embeddings, dim=1)
-        merged_label_vector = self.fc1(merged_label_vector)
-        merged_label_vector = nn.functional.relu(merged_label_vector)
-        merged_label_vector = self.fc2(merged_label_vector)
         logits = self.classifier(merged_label_vector)
         loss = None
         if labels is not None:
-            cur_device = labels.device
-            cur_weights = torch.tensor([1.0, 8.0]).to(cur_device)
-            loss_fct = CrossEntropyLoss(weight=cur_weights)
+            loss_fct = CrossEntropyLoss()
 
             loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
             loss += self.alpha * torch.sum(torch.exp(-self.learnable_mask.threshold))

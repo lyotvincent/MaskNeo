@@ -66,7 +66,7 @@ from models.modeling_bart import (
 from models.modeling_bert import (
     BertForTokenAttentionSparseCLSJoint
 )
-from transformers import T5Tokenizer
+from transformers import T5Tokenizer, BertTokenizer
 from models.modeling_t5 import T5ForTokenAttentionSparseCLSJoint
 
 
@@ -114,14 +114,15 @@ def parse_args():
         "--prediction_result_file", type=str, default=None, help="A csv or a json file containing prediction result."
     )
     parser.add_argument(
-        "--model_class", type=str, default=None, help="BartForSequenceClassification, BartForTokenAttentionCLS, "
-                                                      "BartForDisentangledRepresentation, BartForTokenAttentionSparseCLS,"
-                                                      "BartForTokenAttentionSparseCLSJoint"
+        "--model_class",
+        type=str,
+        default="BertForTokenAttentionSparseCLSJoint",
+        help="BertForTokenAttentionSparseCLSJoint",
     )
     parser.add_argument(
         "--max_length",
         type=int,
-        default=128,
+        default=200,
         help=(
             "The maximum total input sequence length after tokenization. Sequences longer than this will be truncated,"
             " sequences shorter will be padded if `--pad_to_max_lengh` is passed."
@@ -146,22 +147,22 @@ def parse_args():
     parser.add_argument(
         "--per_device_train_batch_size",
         type=int,
-        default=8,
+        default=16,
         help="Batch size (per device) for the training dataloader.",
     )
     parser.add_argument(
         "--per_device_eval_batch_size",
         type=int,
-        default=16,
+        default=32,
         help="Batch size (per device) for the evaluation dataloader.",
     )
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=5e-5,
+        default=1e-5,
         help="Initial learning rate (after the potential warmup period) to use.",
     )
-    parser.add_argument("--weight_decay", type=float, default=0.0, help="Weight decay to use.")
+    parser.add_argument("--weight_decay", type=float, default=0.01, help="Weight decay to use.")
     parser.add_argument("--num_train_epochs", type=int, default=100, help="Total number of training epochs to perform.")
     parser.add_argument(
         "--max_train_steps",
@@ -183,7 +184,7 @@ def parse_args():
         choices=["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
     )
     parser.add_argument(
-        "--num_warmup_steps", type=int, default=0, help="Number of steps for the warmup in the lr scheduler."
+        "--num_warmup_steps", type=int, default=-1, help="Number of steps for the warmup in the lr scheduler, the recommended setting is 5 to 10 percent of total training steps."
     )
     parser.add_argument("--output_dir", type=str, default=None, help="Where to store the final model.")
     parser.add_argument("--seed", type=int, default=42, help="A seed for reproducible training.")
@@ -222,7 +223,7 @@ def parse_args():
     parser.add_argument(
         "--patience",
         type=int,
-        default=6,
+        default=999,
         help="Number of epochs with no improvement after which training will be stopped.",
     )
     parser.add_argument(
@@ -347,7 +348,8 @@ def main():
     # download model & vocab.
     config = AutoConfig.from_pretrained(args.model_name_or_path, num_labels=num_labels, finetuning_task=args.task_name)
     # tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, use_fast=not args.use_slow_tokenizer)
-    tokenizer = T5Tokenizer.from_pretrained(args.model_name_or_path, do_lower_case=False)
+    tokenizer = BertTokenizer.from_pretrained(args.model_name_or_path, do_lower_case=False)
+    # tokenizer = T5Tokenizer.from_pretrained(args.model_name_or_path, do_lower_case=False)
 
     if args.model_class == "BartForSequenceClassification":
         model = BartForSequenceClassification.from_pretrained(
@@ -385,13 +387,15 @@ def main():
             ignore_mismatched_sizes=args.ignore_mismatched_sizes,
         )
     elif args.model_class == "BertForTokenAttentionSparseCLSJoint":
-        # model = BertForTokenAttentionSparseCLSJoint.from_pretrained(
-        #     args.model_name_or_path,
-        #     from_tf=bool(".ckpt" in args.model_name_or_path),
-        #     config=config,
-        #     ignore_mismatched_sizes=args.ignore_mismatched_sizes,
-        # )
-        model = BertForTokenAttentionSparseCLSJoint(config)
+        if args.only_evaluation:
+            model = BertForTokenAttentionSparseCLSJoint.from_pretrained(
+                args.model_name_or_path,
+                from_tf=bool(".ckpt" in args.model_name_or_path),
+                config=config,
+                ignore_mismatched_sizes=args.ignore_mismatched_sizes,
+            )
+        else:
+            model = BertForTokenAttentionSparseCLSJoint(config)
     elif args.model_class == "T5ForTokenAttentionSparseCLSJoint":
         model = T5ForTokenAttentionSparseCLSJoint.from_pretrained(
             args.model_name_or_path,
@@ -475,6 +479,7 @@ def main():
                 if i == 1:
                     assert sentence2_key is not None
                     text = text[:180]  # The HLA sequence is truncated to the peptide-binding domain (chain A, residues 1 to 180).
+                text = text.upper()
                 processed_text = " ".join(list(re.sub(r"[UZOB]", "X", text)))
                 processed_group.append(processed_text)
             processed_texts.append(processed_group)
@@ -509,8 +514,9 @@ def main():
     negative_count = len(train_dataset) - positive_count
     logger.info(f"the original training set: positive {positive_count}, negative {negative_count}.")
 
-    if (negative_count / positive_count) > 8:
-        positive_samples = train_dataset.select(positive_sample_indices + positive_sample_indices)
+    if (negative_count / positive_count) > 6:
+        positive_times = math.ceil((negative_count / positive_count) / 2)
+        positive_samples = train_dataset.select(positive_sample_indices * positive_times)
 
         train_dataset = concatenate_datasets([train_dataset, positive_samples])
 
@@ -559,6 +565,11 @@ def main():
     if args.max_train_steps is None:
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
         overrode_max_train_steps = True
+    temp_max_train_steps = args.max_train_steps
+    temp_num_train_epochs = args.num_train_epochs
+    
+    if args.num_warmup_steps < 0:
+        args.num_warmup_steps = math.ceil(0.06 * args.max_train_steps)
 
     lr_scheduler = get_scheduler(
         name=args.lr_scheduler_type,
@@ -578,6 +589,7 @@ def main():
         args.max_train_steps = args.num_train_epochs * num_update_steps_per_epoch
     # Afterwards we recalculate our number of training epochs
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
+    # assert args.max_train_steps == temp_max_train_steps and args.num_train_epochs == temp_num_train_epochs
 
     # Figure out how many steps we should save the Accelerator states
     checkpointing_steps = args.checkpointing_steps
@@ -618,9 +630,10 @@ def main():
                 outputs = model(**batch)
             if outputs.disentangle_mask is not None:
                 zero_ratio = torch.sum(outputs.disentangle_mask == 0.) / outputs.disentangle_mask.numel()
-            predictions = outputs.logits.argmax(dim=-1) if not is_regression else outputs.logits.squeeze()
+            # predictions = outputs.logits.argmax(dim=-1) if not is_regression else outputs.logits.squeeze()
+            predictions = (torch.sigmoid(outputs.logits.squeeze()) > 0.5).long()
             predictions, references = accelerator.gather_for_metrics((predictions, batch["labels"]))
-            all_inputs += tokenizer.batch_decode(batch["input_ids"], skip_special_tokens=True)
+            all_inputs += tokenizer.batch_decode(batch["input_ids"], skip_special_tokens=False)
             all_references += references.tolist()
             all_predictions += predictions.tolist()
 
@@ -643,6 +656,8 @@ def main():
         # save prediction result
         if args.prediction_result_file is not None and accelerator.is_main_process:
             df = pd.DataFrame({'text': all_inputs, 'reference': all_references, 'predictions': all_predictions})
+            # make sure the directory exists
+            os.makedirs(os.path.dirname(args.prediction_result_file), exist_ok=True)
             df.to_csv(args.prediction_result_file, index=False)
             eval_metric_file = os.path.splitext(args.prediction_result_file)[0] + "_eval_metric.json"
             with open(eval_metric_file, "w") as f:
@@ -660,6 +675,11 @@ def main():
         metrics2 = []
         metrics3 = []
         metrics4 = []
+        metrics5 = []
+        metrics6 = []
+        metrics7 = []
+        metrics8 = []
+        metrics9 = []
         zero_ratios = []
         best_metric = 0
         patience_counter = 0
@@ -720,7 +740,8 @@ def main():
                 if outputs.disentangle_mask is not None:
                     zero_ratio = torch.sum(outputs.disentangle_mask == 0.) / outputs.disentangle_mask.numel()
                     zero_ratio = zero_ratio.item()
-                predictions = outputs.logits.argmax(dim=-1) if not is_regression else outputs.logits.squeeze()
+                # predictions = outputs.logits.argmax(dim=-1) if not is_regression else outputs.logits.squeeze()
+                predictions = (torch.sigmoid(outputs.logits.squeeze()) > 0.5).long()
                 predictions, references = accelerator.gather_for_metrics((predictions, batch["labels"]))
                 all_references += references.tolist()
                 all_predictions += predictions.tolist()
@@ -757,6 +778,15 @@ def main():
             metrics2.append(all_eval_metric[1])
             metrics3.append(all_eval_metric[2])
             metrics4.append(all_eval_metric[3])
+            metrics5.append(total_loss.item() / len(train_dataloader))
+            metric_tp = sum(1 for pred, ref in zip(all_predictions, all_references) if pred == 1 and ref == 1)
+            metric_tn = sum(1 for pred, ref in zip(all_predictions, all_references) if pred == 0 and ref == 0)
+            metric_fp = sum(1 for pred, ref in zip(all_predictions, all_references) if pred == 1 and ref == 0)
+            metric_fn = sum(1 for pred, ref in zip(all_predictions, all_references) if pred == 0 and ref == 1)
+            metrics6.append(metric_tp)
+            metrics7.append(metric_tn)
+            metrics8.append(metric_fp)
+            metrics9.append(metric_fn)
             logger.info(f"epoch {epoch}: {all_eval_metric}")
 
             if outputs.disentangle_mask is not None:
@@ -769,6 +799,12 @@ def main():
                 all_results["precision"] = metrics2
                 all_results["recall"] = metrics3
                 all_results["f1"] = metrics4
+                all_results["loss"] = metrics5
+                all_results["best_metric"] = [metrics[metrics4.index(max(metrics4))], metrics2[metrics4.index(max(metrics4))], metrics3[metrics4.index(max(metrics4))], max(metrics4), metrics5[metrics4.index(max(metrics4))]]
+                all_results["TP"] = metrics6
+                all_results["TN"] = metrics7
+                all_results["FP"] = metrics8
+                all_results["FN"] = metrics9
                 all_results["zero_ratios"] = zero_ratios
                 with open(os.path.join(args.output_dir, "all_results.json"), "w") as f:
                     json.dump(all_results, f)
