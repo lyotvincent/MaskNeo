@@ -62,7 +62,7 @@ def create_dataset(neoantigen_file, output_dir, valid_ratio=0.1, random_state=42
     
     os.makedirs(output_dir, exist_ok=True)
     
-    if valid_ratio > 0:
+    if valid_ratio < 1:
         neoantigen_df = neoantigen_df.sample(frac=1, random_state=random_state).reset_index(drop=True)
         valid_size = math.ceil(len(neoantigen_df) * valid_ratio)
         valid_df = neoantigen_df[:valid_size]
