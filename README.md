@@ -1,12 +1,6 @@
 # MaskNeo
 MaskNeo: Advancing Neoantigen Immunogenicity Prediction with Adaptive Feature Masking
 
-## Requirements
-- [prot_bert](https://huggingface.co/Rostlab/prot_bert)
-- [hla_prot.fasta](https://github.com/ANHIG/IMGTHLA/)
-
-The files above should be placed in the current directory.
-
 ## Setup
 We use conda to manage python packages.
 ```shell
@@ -15,6 +9,12 @@ cd MaskNeo
 conda env create -n MaskNeo --file environment.yml
 conda activate MaskNeo
 ```
+
+## Requirements
+- [prot_bert](https://huggingface.co/Rostlab/prot_bert)
+- [hla_prot.fasta](https://github.com/ANHIG/IMGTHLA/)
+
+The required files above should be placed in the current directory.
 
 ## Usage
 An example input data is available in the `example` folder. The input data should have `peptide`, `HLA` and `immunogenicity` columns in a **`tab-delimited text format`**. Run the following command to preprocess the data:
